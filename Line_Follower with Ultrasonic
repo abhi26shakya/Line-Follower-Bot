@@ -1,0 +1,172 @@
+// PID Constants
+float Kp = 4, Ki = 0.001, Kd = 2.8;
+float error = 0, P = 0, I = 0, D = 0, PID_value = 0;
+float previous_error = 0, previous_I = 0;
+void turn_around(void);
+// Sensor and Motor Variables
+int sensor[8], sum = 0;
+int max_speed = 120;
+int initial_motor_speed = 100;
+int i = 0;
+
+// Pin Configuration (IR Sensors and Motors)
+int sensorPins[8] = {A7, A6, A5, A4, A3, A2, A1, A0}; // IR Sensor Array
+int ENA = 5, IN1 = 3, IN2 = 4; // Right Motor
+int ENB = 6, IN3 = 7, IN4 = 8; // Left Motor
+
+// Ultrasonic Sensor Pins
+#define US_TRIG 13  // Ultrasonic Trigger Pin
+#define US_ECHO 2  // Ultrasonic Echo Pin
+
+// Ultrasonic Sensor Variables
+unsigned long lastUltrasonicTime = 0;
+float distance = 0;
+
+void setup() {
+    // Motor Control Setup
+    pinMode(ENA, OUTPUT);
+    pinMode(IN1, OUTPUT);
+    pinMode(IN2, OUTPUT);
+    pinMode(ENB, OUTPUT);
+    pinMode(IN3, OUTPUT);
+    pinMode(IN4, OUTPUT);
+
+    // IR Sensor Setup
+    for (int i = 0; i < 8; i++) {
+        pinMode(sensorPins[i], INPUT);
+    }
+
+    // Ultrasonic Sensor Setup
+    pinMode(US_TRIG, OUTPUT);
+    pinMode(US_ECHO, INPUT);
+
+    // Initialize Serial Monitor for Debugging
+    Serial.begin(9600);
+}
+
+void loop() {
+    // Read Ultrasonic Sensor (Non-Blocking)
+    readUltrasonicNonBlocking();
+
+    // If an obstacle is detected within 20 cm, stop the bot
+    if (distance < 15) {
+        turn_around();
+        Serial.println("Obstacle Detected! Rotating bot.");
+    } else {
+        // If no obstacle, continue line following
+        read_sensor_values();
+        calculate_pid();
+        motor_control();
+    }
+}
+
+void readUltrasonicNonBlocking() {
+    // Send Ultrasonic Pulse every 100ms
+    if (millis() - lastUltrasonicTime >= 100) {
+        lastUltrasonicTime = millis();
+
+        // Send Trigger Pulse
+        digitalWrite(US_TRIG, LOW);
+        delayMicroseconds(2);
+        digitalWrite(US_TRIG, HIGH);
+        delayMicroseconds(10);
+        digitalWrite(US_TRIG, LOW);
+
+        // Measure Echo Pulse Duration
+        float duration = pulseIn(US_ECHO, HIGH);
+
+        // Calculate Distance in cm
+        distance = (duration * 0.0343) / 2;
+
+        // Debug: Print Distance
+        Serial.print("Distance: ");
+        Serial.println(distance);
+    }
+}
+
+void read_sensor_values() {
+    for (i = 0; i < 8; i++) {
+        sensor[i] = analogRead(sensorPins[i]) > 1000 ? 1 : 0;
+        Serial.print("Sensor ");
+        Serial.print(i);
+        Serial.print(": ");
+        Serial.println(sensor[i]);
+    }
+    sum = sensor[0] + sensor[1] + sensor[2] + sensor[3] + sensor[4] + sensor[5] + sensor[6] + sensor[7];
+    Serial.print("Sum: ");
+    Serial.println(sum);
+
+    // Calculate Error Based on Sensor Readings
+    if (sum == 1 && sensor[7] == 1) { error = 5; }
+    else if ((sensor[6] == 1 && sensor[7] == 1) && sum == 2) { error = 4; }
+    else if (sensor[6] == 1 && sum == 1) { error = 3; }
+    else if (sensor[5] == 1 && sensor[6] == 1 && sum == 2) { error = 2; }
+    else if (sensor[5] == 1 && sum == 1) { error = 1; }
+    else if (sensor[4] == 1 && sensor[5] == 1 && sum == 2) { error = 0; }
+    else if (sensor[4] == 1 && sum == 1) { error = -1; }
+    else if (sensor[3] == 1 && sensor[4] == 1 && sum == 2) { error = -2; }
+    else if (sensor[3] == 1 && sum == 1) { error = -3; }
+    else if (sensor[2] == 1 && sensor[3] == 1 && sum == 2) { error = -4; }
+    else if (sensor[0] == 1 && sum == 1) { error = -5; }
+    else if (sum == 8) { error = 6; }
+}
+
+void calculate_pid() {
+    P = error;
+    I = I + previous_I;
+    D = error - previous_error;
+
+    PID_value = (Kp * P) + (Ki * I) + (Kd * D);
+
+    previous_I = I;
+    previous_error = error;
+
+    Serial.print("PID Value: ");
+    Serial.println(PID_value);
+}
+
+void motor_control() {
+    int left_motor_speed = initial_motor_speed - PID_value;
+    int right_motor_speed = initial_motor_speed + PID_value;
+
+    // Constrain Motor Speeds to Valid Range
+    left_motor_speed = constrain(left_motor_speed, 0, max_speed);
+    right_motor_speed = constrain(right_motor_speed, 0, max_speed);
+
+    // Apply Motor Speeds
+    analogWrite(ENA, left_motor_speed);
+    analogWrite(ENB, right_motor_speed);
+
+    // Control Motor Direction Based on Error
+    if (error == 0) {
+        // Move Forward
+        digitalWrite(IN1, LOW);
+        digitalWrite(IN2, HIGH);
+        digitalWrite(IN3, LOW);
+        digitalWrite(IN4, HIGH);
+    } else if (sum == 0) {
+        // No Line Detected
+        if (previous_error <= 0) {
+            // Turn Left
+            digitalWrite(IN1, LOW);
+            digitalWrite(IN2, HIGH);
+            digitalWrite(IN3, LOW);
+            digitalWrite(IN4, LOW);
+        } else {
+            // Turn Right
+            digitalWrite(IN1, LOW);
+            digitalWrite(IN2, LOW);
+            digitalWrite(IN3, LOW);
+            digitalWrite(IN4, HIGH);
+        }
+    }
+}
+
+void turn_around()
+{
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, LOW);
+    digitalWrite(IN3, HIGH);
+    digitalWrite(IN4, LOW);
+    delay(1200); 
+}
